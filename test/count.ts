@@ -1,5 +1,4 @@
 import { args } from "deno";
-// console.log(args);
 const name = args[1];
 const seconds = args.slice(2);
 if (!seconds.length) {

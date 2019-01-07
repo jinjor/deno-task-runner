@@ -13,5 +13,5 @@ install:
 script:
   - deno -v
   - deno --allow-run test/test-task.ts --cwd=test | tee tmp/result
-  - deno test/test.ts
+  - deno test/test.ts --allow-run
   - deno example/example.ts --cwd=example all --allow-run

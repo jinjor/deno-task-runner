@@ -69,6 +69,16 @@ test(async function errors() {
     runner.task("parent", ["$child"]).watch(".");
     await runner.run("parent", []);
   });
+  await throws(async () => {
+    const runner = new TaskRunner();
+    runner.task(
+      "failure",
+      "echo start",
+      ["deno test/failure.ts", "echo another"],
+      "echo end"
+    );
+    await runner.run("failure");
+  });
 });
 
 export async function throws(
