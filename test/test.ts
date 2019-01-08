@@ -1,5 +1,5 @@
 import { readFile } from "deno";
-import { test } from "https://deno.land/x/testing/mod.ts";
+import { test } from "https://deno.land/x/testing@v0.2.5/mod.ts";
 import { assertEqual } from "https://deno.land/x/pretty_assert@0.1.3/mod.ts";
 import { TaskRunner } from "../runner.ts";
 

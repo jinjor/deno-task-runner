@@ -1,8 +1,7 @@
 import { ProcessStatus, Closer, DenoError, ErrorKind, Process } from "deno";
 import * as deno from "deno";
-
-import watch from "https://raw.githubusercontent.com/jinjor/deno-watch/1.0.0/mod.ts";
-import * as path from "https://deno.land/x/path/index.ts";
+import watch from "https://deno.land/x/watch@1.1.0/mod.ts";
+import * as path from "https://deno.land/x/path@v0.2.5/index.ts";
 
 type Tasks = { [name: string]: Command };
 interface ResolveContext {

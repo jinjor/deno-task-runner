@@ -7,7 +7,7 @@ Write tasks in deno.
 ## Example
 
 ```typescript
-import { task } from "https://raw.githubusercontent.com/jinjor/deno-task-runner/master/mod.ts";
+import { task } from "https://deno.land/x/task_runner/mod.ts";
 
 task("prepare", "echo preparing...");
 task("counter", "deno counter.ts");
