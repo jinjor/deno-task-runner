@@ -47,6 +47,6 @@ new Promise(resolve => setTimeout(resolve, 0))
     await globalRunner.run(taskName, taskArgs, { cwd });
   })
   .catch(e => {
-    console.error(e.message);
+    console.error(e);
     exit(1);
   });
