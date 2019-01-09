@@ -152,7 +152,7 @@ class SyncWatcher implements Command {
     await this.command
       .run(args, { ...context, resources: childResources })
       .catch(_ => {});
-    for await (const _ of watch(dirs_)) {
+    for await (const _ of watch(dirs_, this.watchOptions)) {
       closeResouces(childResources);
       await this.command
         .run(args, { ...context, resources: childResources })
