@@ -1,6 +1,6 @@
 import { ProcessStatus, Closer, DenoError, ErrorKind, Process } from "deno";
 import * as deno from "deno";
-import watch from "https://deno.land/x/watch@1.1.0/mod.ts";
+import watch from "https://deno.land/x/watch@1.1.1/mod.ts";
 import * as path from "https://deno.land/x/path@v0.2.5/index.ts";
 
 type Tasks = { [name: string]: Command };
@@ -152,7 +152,7 @@ class SyncWatcher implements Command {
     await this.command
       .run(args, { ...context, resources: childResources })
       .catch(_ => {});
-    for await (const _ of watch(dirs_)) {
+    for await (const _ of watch(dirs_, this.watchOptions)) {
       closeResouces(childResources);
       await this.command
         .run(args, { ...context, resources: childResources })
