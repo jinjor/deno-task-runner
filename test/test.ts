@@ -1,11 +1,15 @@
 import { readFile } from "deno";
 import { test } from "https://deno.land/x/testing@v0.2.5/mod.ts";
-import { assertEqual } from "https://deno.land/x/pretty_assert@0.1.3/mod.ts";
+import { assertEqual } from "https://deno.land/x/pretty_assert@0.1.4/mod.ts";
 import { TaskRunner } from "../runner.ts";
 
 test(async function basics() {
   const bytes = await readFile("tmp/result");
-  const result = new TextDecoder().decode(bytes).trim();
+  const result = new TextDecoder()
+    .decode(bytes)
+    .replace(/\r\n/g, "\n")
+    .trim();
+
   assertEqual(result, expectation);
 });
 
@@ -22,7 +26,9 @@ foo
 bar
 foo
 end
-`.trim();
+`
+  .replace(/\r\n/g, "\n")
+  .trim();
 
 test(async function errors() {
   await throws(async () => {

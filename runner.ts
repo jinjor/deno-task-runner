@@ -1,6 +1,9 @@
 import { ProcessStatus, Closer, DenoError, ErrorKind, Process } from "deno";
 import * as deno from "deno";
-import watch from "https://deno.land/x/watch@1.1.1/mod.ts";
+import {
+  watch,
+  Options as WatchOptions
+} from "https://deno.land/x/watch@1.2.0/mod.ts";
 import * as path from "https://deno.land/x/path@v0.2.5/index.ts";
 
 type Tasks = { [name: string]: Command };
@@ -24,11 +27,11 @@ interface Command {
 }
 class Single implements Command {
   constructor(public name: string, public args: string[]) {}
-  resolveRef(tasks, _) {
+  resolveRef(tasks: Tasks, _: ResolveContext) {
     return this;
   }
-  async run(args, { cwd, resources }) {
-    let p;
+  async run(args: string[], { cwd, resources }: RunContext) {
+    let p: Process;
     try {
       p = deno.run({
         args: [this.name, ...this.args, ...args],
@@ -68,7 +71,7 @@ async function kill(p: Process) {
 
 class Ref implements Command {
   constructor(public name: string, public args: string[]) {}
-  resolveRef(tasks, context) {
+  resolveRef(tasks: Tasks, context: ResolveContext) {
     let command = tasks[this.name];
     if (!command) {
       throw new Error(`Task "${this.name}" is not defined.`);
@@ -84,7 +87,7 @@ class Ref implements Command {
       checked: new Set(context.checked).add(this.name)
     });
   }
-  async run(args, options) {
+  async run(args: string[], context: RunContext) {
     throw new Error("Ref should be resolved before running.");
   }
 }
@@ -93,14 +96,14 @@ class Sequence implements Command {
   constructor(commands: Command[]) {
     this.commands = commands;
   }
-  resolveRef(tasks, context) {
+  resolveRef(tasks: Tasks, context: ResolveContext) {
     return new Sequence(
       this.commands.map(c => {
         return c.resolveRef(tasks, context);
       })
     );
   }
-  async run(args, context) {
+  async run(args: string[], context: RunContext) {
     if (args.length) {
       throw new Error("Cannot pass args to sequential tasks.");
     }
@@ -114,14 +117,14 @@ class Parallel implements Command {
   constructor(commands: Command[]) {
     this.commands = commands;
   }
-  resolveRef(tasks, context) {
+  resolveRef(tasks: Tasks, context: ResolveContext) {
     return new Parallel(
       this.commands.map(c => {
         return c.resolveRef(tasks, context);
       })
     );
   }
-  async run(args, context) {
+  async run(args: string[], context: RunContext) {
     if (args.length) {
       throw new Error("Cannot pass args to parallel tasks.");
     }
@@ -131,10 +134,10 @@ class Parallel implements Command {
 class SyncWatcher implements Command {
   constructor(
     public dirs: string[],
-    public watchOptions,
+    public watchOptions: WatchOptions,
     public command: Command
   ) {}
-  resolveRef(tasks, context) {
+  resolveRef(tasks: Tasks, context: ResolveContext) {
     if (context.hasWatcher) {
       throw new Error("Nested watchers not supported.");
     }
@@ -144,7 +147,7 @@ class SyncWatcher implements Command {
       this.command.resolveRef(tasks, { ...context, hasWatcher: true })
     );
   }
-  async run(args, context) {
+  async run(args: string[], context: RunContext) {
     const dirs_ = this.dirs.map(d => {
       return path.join(context.cwd, d);
     });
@@ -163,10 +166,10 @@ class SyncWatcher implements Command {
 class AsyncWatcher implements Command {
   constructor(
     public dirs: string[],
-    public watchOptions: any,
+    public watchOptions: WatchOptions,
     public command: Command
   ) {}
-  resolveRef(tasks, context) {
+  resolveRef(tasks: Tasks, context: ResolveContext) {
     if (context.hasWatcher) {
       throw new Error("Nested watchers not supported.");
     }
@@ -176,7 +179,7 @@ class AsyncWatcher implements Command {
       this.command.resolveRef(tasks, { ...context, hasWatcher: true })
     );
   }
-  async run(args, context) {
+  async run(args: string[], context: RunContext) {
     const dirs_ = this.dirs.map(d => {
       return path.join(context.cwd, d);
     });

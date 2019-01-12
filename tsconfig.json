@@ -2,6 +2,7 @@
   "compilerOptions": {
     "target": "es6",
     "baseUrl": ".",
+    "noImplicitAny": true,
     "paths": {
       "deno": ["../../.deno/deno.d.ts"],
       "http://*": ["../../.deno/deps/http/*"],
