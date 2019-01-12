@@ -1,0 +1,11 @@
+install:
+  - ps: iex (iwr https://deno.land/x/install/install.ps1)
+
+test_script:
+  - deno -v
+  - mkdir tmp
+  - deno --allow-run test/test-task.ts --cwd=test | tee tmp/result
+  - deno test/test.ts --allow-run
+  - deno example/example.ts --cwd=example all --allow-run
+
+build: off
