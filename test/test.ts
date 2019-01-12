@@ -5,7 +5,11 @@ import { TaskRunner } from "../runner.ts";
 
 test(async function basics() {
   const bytes = await readFile("tmp/result");
-  const result = new TextDecoder().decode(bytes).trim();
+  const result = new TextDecoder()
+    .decode(bytes)
+    .replace(/\r\n/g, "\n")
+    .trim();
+
   assertEqual(result, expectation);
 });
 
@@ -22,7 +26,9 @@ foo
 bar
 foo
 end
-`.trim();
+`
+  .replace(/\r\n/g, "\n")
+  .trim();
 
 test(async function errors() {
   await throws(async () => {
