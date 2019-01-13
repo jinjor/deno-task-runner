@@ -32,8 +32,8 @@ const seq: Parser<AST.Sequence> = sep(/(&&|\|\|)/, para);
 function reduceCommand(ast: LTree<string>): AST.Command {
   let result: AST.Command = { command: null };
   while (true) {
-    if (typeof ast === "string") {
-      result.command = ast.trim();
+    if (ast instanceof Leaf) {
+      result.command = ast.value.trim();
       break;
     }
     if (ast.op === "<") {
@@ -68,7 +68,7 @@ function sep<A>(op: RegExp, each: Parser<A>): Parser<LTree<A>> {
     if (!arr.length) {
       throw new ParseError();
     }
-    let ast: LTree<A> = each(arr[0]);
+    let ast: LTree<A> = new Leaf(each(arr[0]));
     for (let i = 1; i < arr.length; i++) {
       const op = arr[i];
       i++;
@@ -79,7 +79,10 @@ function sep<A>(op: RegExp, each: Parser<A>): Parser<LTree<A>> {
   };
 }
 type Parser<A> = (input: string) => A;
-type LTree<A> = A | LBranch<A>;
+type LTree<A> = Leaf<A> | LBranch<A>;
+export class Leaf<A> {
+  constructor(public value: A) {}
+}
 interface LBranch<A> {
   left: LTree<A>;
   op: string;

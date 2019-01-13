@@ -5,6 +5,7 @@ import {
   Options as WatchOptions
 } from "https://deno.land/x/watch@1.2.0/mod.ts";
 import * as path from "https://deno.land/x/path@v0.2.5/index.ts";
+import { parse, AST, Leaf } from "parser.ts";
 
 type Tasks = { [name: string]: Command };
 interface ResolveContext {
@@ -283,8 +284,29 @@ function makeNonSequenceCommand(rawCommand: string | string[]): Command {
   }
   return new Parallel(rawCommand.map(makeSingleCommand));
 }
-function makeSingleCommand(raw: string) {
-  const splitted = raw.split(/\s/);
+function makeSingleCommand(raw: string): Command {
+  const ast = parse(raw);
+  return makeCommandFromAST(ast);
+}
+
+function makeCommandFromAST(ast: AST.Sequence): Command {
+  if (ast instanceof Leaf) {
+    return makeCommandFromASTParallel(ast.value);
+  }
+  const left = makeCommandFromAST(ast.left);
+  const right = makeCommandFromASTParallel(ast.right);
+  return new Sequence([left, right]);
+}
+function makeCommandFromASTParallel(ast: AST.Parallel): Command {
+  if (ast instanceof Leaf) {
+    return makeCommandFromASTCommand(ast.value);
+  }
+  const left = makeCommandFromASTParallel(ast.left);
+  const right = makeCommandFromASTCommand(ast.right);
+  return new Parallel([left, right]);
+}
+function makeCommandFromASTCommand(ast: AST.Command): Command {
+  const splitted = ast.command.split(/\s/);
   if (!splitted.length) {
     throw new Error("Command should not be empty.");
   }
