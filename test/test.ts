@@ -1,7 +1,32 @@
-import { readFile } from "deno";
+import { readFile, inspect } from "deno";
 import { test } from "https://deno.land/x/testing@v0.2.5/mod.ts";
 import { assertEqual } from "https://deno.land/x/pretty_assert@0.1.4/mod.ts";
 import { TaskRunner } from "../runner.ts";
+import { parse, AST } from "../parser.ts";
+
+test(async function parser() {
+  const input = "a 1 && b 2 | c 3 > d 4 < e 5 & f 6 || g 7";
+  const ast: AST.Sequence = parse(input);
+  console.log(input);
+  console.log(JSON.stringify(ast, null, 2));
+  await throws(async () => {
+    parse("");
+  });
+  const ops = ["<", ">", "&", "|", "&&", "||"];
+  for (let s of [
+    ...ops,
+    ...ops.map(op => `a ${op}`),
+    ...ops.map(op => `a${op}`),
+    ...ops.map(op => `${op} b`),
+    ...ops.map(op => `${op}b`),
+    ...ops.map(op => `a ${op} ${op} b`),
+    ...ops.map(op => `a${op} ${op}b`)
+  ]) {
+    await throws(() => {
+      parse(s);
+    });
+  }
+});
 
 test(async function basics() {
   const bytes = await readFile("tmp/result");
@@ -86,6 +111,8 @@ test(async function errors() {
     await runner.run("failure");
   });
 });
+
+// Utilities
 
 export async function throws(
   f: () => Promise<void> | void,
