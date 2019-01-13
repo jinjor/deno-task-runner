@@ -19,37 +19,49 @@ class ProcessError extends Error {
   }
 }
 interface Command {
-  run(context: RunContext): Promise<void>;
+  run(args: string[], ontext: RunContext): Promise<void>;
 }
-class Single implements Command {
+class Atom implements Command {
   constructor(
-    public name: string,
     public args: string[],
     public input: string,
     public output: string
   ) {}
-  async run({ cwd, resources }: RunContext) {
+  async run(args: string[], { taskFile, cwd, resources }: RunContext) {
+    const stdout = this.output ? "piped" : "inherit";
     let p: Process;
-    try {
-      const stdout = this.output ? "piped" : "inherit";
+    if (this.args[0].charAt(0) === "$") {
+      // Run another task
+      const name = this.args[0];
+      const rest = this.args.slice(1);
+      const taskName = name.slice(1);
+      if (!taskName.length) {
+        throw new Error("Task name should not be empty.");
+      }
       p = deno.run({
-        args: [this.name, ...this.args],
+        args: [
+          "deno",
+          "--allow-run",
+          taskFile,
+          `--cwd=${cwd}`,
+          taskName,
+          ...rest,
+          ...args
+        ],
+        stdout: stdout,
+        stderr: "inherit"
+      });
+    } else {
+      p = deno.run({
+        args: [...this.args, ...args],
         cwd: cwd,
         stdout: stdout,
         stderr: "inherit"
       });
-      if (stdout === "piped") {
-        const outputFile = await deno.open(
-          path.resolve(cwd, this.output),
-          "w+"
-        );
-        await deno.copy(outputFile, p.stdout);
-      }
-    } catch (e) {
-      if (e instanceof DenoError && e.kind === ErrorKind.NotFound) {
-        throw new Error(`Command "${this.name}" not found.`);
-      }
-      throw e;
+    }
+    if (stdout === "piped") {
+      const outputFile = await deno.open(path.resolve(cwd, this.output), "w+");
+      await deno.copy(outputFile, p.stdout);
     }
     const closer = {
       close() {
@@ -74,30 +86,36 @@ async function kill(p: Process) {
   await k.status();
   k.close();
 }
-
-class Ref implements Command {
-  constructor(
-    public name: string,
-    public args: string[],
-    public input: string,
-    public output: string
-  ) {}
-  async run(context: RunContext) {
-    throw new Error("Ref should be resolved before running.");
-  }
-}
 class Sequence implements Command {
-  constructor(public commands: Command[]) {}
-  async run(context: RunContext) {
-    for (let command of this.commands) {
-      await command.run(context);
+  constructor(
+    public prev: Command,
+    public curr: Command,
+    public op: AST.SequenceOp
+  ) {}
+  async run(args: string[], context: RunContext): Promise<void> {
+    if (args.length) {
+      throw new Error("Cannot pass args to sequential tasks.");
     }
+    await this.prev.run([], context).catch(e => {
+      if (this.op === "&&") {
+        return Promise.reject();
+      }
+    });
+    await this.curr.run([], context);
   }
 }
+
 class Parallel implements Command {
-  constructor(public commands: Command[]) {}
-  async run(context: RunContext) {
-    await Promise.all(this.commands.map(c => c.run(context)));
+  constructor(
+    public prev: Command,
+    public curr: Command,
+    public op: AST.ParallelOp
+  ) {}
+  async run(args: string[], context: RunContext): Promise<void> {
+    if (args.length) {
+      throw new Error("Cannot pass args to parallel tasks.");
+    }
+    await Promise.all([this.prev.run([], context), this.curr.run([], context)]);
   }
 }
 class SyncWatcher implements Command {
@@ -106,18 +124,18 @@ class SyncWatcher implements Command {
     public watchOptions: WatchOptions,
     public command: Command
   ) {}
-  async run(context: RunContext) {
+  async run(args: string[], context: RunContext): Promise<void> {
     const dirs_ = this.dirs.map(d => {
       return path.join(context.cwd, d);
     });
     const childResources = new Set();
     await this.command
-      .run({ ...context, resources: childResources })
+      .run(args, { ...context, resources: childResources })
       .catch(_ => {});
     for await (const _ of watch(dirs_, this.watchOptions)) {
       closeResouces(childResources);
       await this.command
-        .run({ ...context, resources: childResources })
+        .run(args, { ...context, resources: childResources })
         .catch(_ => {});
     }
   }
@@ -128,7 +146,7 @@ class AsyncWatcher implements Command {
     public watchOptions: WatchOptions,
     public command: Command
   ) {}
-  async run(context: RunContext) {
+  async run(args: string[], context: RunContext): Promise<void> {
     const dirs_ = this.dirs.map(d => {
       return path.join(context.cwd, d);
     });
@@ -139,11 +157,13 @@ class AsyncWatcher implements Command {
       }
     };
     context.resources.add(closer);
-    this.command.run({ ...context, resources: childResources }).catch(_ => {});
+    await this.command
+      .run(args, { ...context, resources: childResources })
+      .catch(_ => {});
     for await (const _ of watch(dirs_, this.watchOptions)) {
       closeResouces(childResources);
       this.command
-        .run({ ...context, resources: childResources })
+        .run(args, { ...context, resources: childResources })
         .catch(_ => {});
     }
     context.resources.delete(closer);
@@ -185,19 +205,21 @@ interface RunOptions {
   cwd?: string;
 }
 interface RunContext {
+  taskFile: string;
   cwd: string;
   resources: Set<Closer>;
 }
 export class TaskRunner {
   tasks: Tasks = {};
-  task(name: string, ...rawCommands: (string | string[])[]): TaskDecorator {
+  task(name: string, rawCommand: string): TaskDecorator {
     if (name.split(/\s/).length > 1) {
       throw new Error(`Task name "${name}" is invalid.`);
     }
     if (this.tasks[name]) {
       throw new Error(`Task name "${name}" is duplicated.`);
     }
-    this.tasks[name] = makeCommand(rawCommands);
+    const ast = parse(rawCommand);
+    this.tasks[name] = makeSequence(ast);
     return new TaskDecorator(this.tasks, name);
   }
   async run(taskName: string, args: string[] = [], options: RunOptions) {
@@ -211,59 +233,30 @@ export class TaskRunner {
       cwd: options.cwd,
       resources: new Set()
     };
-    await command.run(context);
+    await command.run(args, context);
   }
 }
 
-function makeCommand(rawCommands: (string | string[])[]): Command {
-  if (rawCommands.length === 0) {
-    throw new Error("Task needs at least one command.");
-  }
-  if (rawCommands.length === 1) {
-    return makeNonSequenceCommand(rawCommands[0]);
-  }
-  return new Sequence(rawCommands.map(makeNonSequenceCommand));
-}
-function makeNonSequenceCommand(rawCommand: string | string[]): Command {
-  if (typeof rawCommand === "string") {
-    return makeSingleCommand(rawCommand);
-  }
-  return new Parallel(rawCommand.map(makeSingleCommand));
-}
-function makeSingleCommand(raw: string): Command {
-  const ast = parse(raw);
-  return makeCommandFromAST(ast);
-}
-
-function makeCommandFromAST(ast: AST.Sequence): Command {
+function makeSequence(ast: AST.Sequence): Command {
   if (ast instanceof Leaf) {
-    return makeCommandFromASTParallel(ast.value);
+    return makeParallel(ast.value);
   }
-  const left = makeCommandFromAST(ast.left);
-  const right = makeCommandFromASTParallel(ast.right);
-  return new Sequence([left, right]);
+  const left = makeSequence(ast.left);
+  const right = makeParallel(ast.right);
+  return new Sequence(left, right, ast.op as any);
 }
-function makeCommandFromASTParallel(ast: AST.Parallel): Command {
+function makeParallel(ast: AST.Parallel): Command {
   if (ast instanceof Leaf) {
-    return makeCommandFromASTCommand(ast.value);
+    return makeAtom(ast.value);
   }
-  const left = makeCommandFromASTParallel(ast.left);
-  const right = makeCommandFromASTCommand(ast.right);
-  return new Parallel([left, right]);
+  const left = makeParallel(ast.left);
+  const right = makeAtom(ast.right);
+  return new Parallel(left, right, ast.op as any);
 }
-function makeCommandFromASTCommand(ast: AST.Command): Command {
-  const splitted = ast.command.split(/\s/);
-  if (!splitted.length) {
+function makeAtom(ast: AST.Command): Command {
+  const args = ast.command.split(/\s/);
+  if (!args.length) {
     throw new Error("Command should not be empty.");
   }
-  const name = splitted[0];
-  const args = splitted.splice(1);
-  if (name.charAt(0) === "$") {
-    const taskName = name.slice(1);
-    if (!taskName.length) {
-      throw new Error("Task name should not be empty.");
-    }
-    return new Ref(taskName, args, ast.input, ast.output);
-  }
-  return new Single(name, args, ast.input, ast.output);
+  return new Atom(args, ast.input, ast.output);
 }

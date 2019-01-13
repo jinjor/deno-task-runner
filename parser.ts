@@ -6,6 +6,8 @@ export namespace AST {
   }
   export type Sequence = LTree<Parallel>;
   export type Parallel = LTree<Command>;
+  export type SequenceOp = "&&" | "||";
+  export type ParallelOp = "&" | "|";
 }
 
 export function parse(s: string): AST.Sequence {

@@ -32,19 +32,35 @@ export function task(
   name: string,
   ...rawCommands: (string | string[])[]
 ): TaskDecorator {
-  return globalRunner.task(name, ...rawCommands);
+  const rawCommand = makeRawCommandForCompatibility(rawCommands);
+  return globalRunner.task(name, rawCommand);
+}
+function makeRawCommandForCompatibility(
+  rawCommands: (string | string[])[]
+): string {
+  return typeof rawCommands === "string"
+    ? rawCommands
+    : rawCommands
+        .map(c => {
+          if (typeof c === "string") {
+            return c;
+          }
+          return c.join(" & ");
+        })
+        .join(" && ");
 }
 
 new Promise(resolve => setTimeout(resolve, 0))
   .then(async () => {
-    const parsedArgs = flags.parse(args);
+    const parsedArgs = flags.parse(args, { string: "_" });
     const cwd = parsedArgs.cwd || ".";
+    const taskFile = parsedArgs._[0];
     const taskName = parsedArgs._[1];
-    const taskArgs = parsedArgs._.splice(2);
+    const taskArgs = parsedArgs._.slice(2);
     if (!taskName) {
       throw new Error("Usage: task_file.ts task_name [--cwd]");
     }
-    await globalRunner.run(taskName, taskArgs, { cwd });
+    await globalRunner.run(taskName, taskArgs, { cwd, taskFile });
   })
   .catch(e => {
     console.error(e);
