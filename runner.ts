@@ -8,10 +8,6 @@ import * as path from "https://deno.land/x/path@v0.2.5/index.ts";
 import { parse, AST, Leaf } from "parser.ts";
 
 type Tasks = { [name: string]: Command };
-interface ResolveContext {
-  checked: Set<string>;
-  hasWatcher: boolean;
-}
 class ProcessError extends Error {
   constructor(
     public pid: number,
@@ -23,23 +19,32 @@ class ProcessError extends Error {
   }
 }
 interface Command {
-  resolveRef(tasks: Tasks, context: ResolveContext): Command;
-  run(args: string[], context: RunContext): Promise<void>;
+  run(context: RunContext): Promise<void>;
 }
 class Single implements Command {
-  constructor(public name: string, public args: string[]) {}
-  resolveRef(tasks: Tasks, _: ResolveContext) {
-    return this;
-  }
-  async run(args: string[], { cwd, resources }: RunContext) {
+  constructor(
+    public name: string,
+    public args: string[],
+    public input: string,
+    public output: string
+  ) {}
+  async run({ cwd, resources }: RunContext) {
     let p: Process;
     try {
+      const stdout = this.output ? "piped" : "inherit";
       p = deno.run({
-        args: [this.name, ...this.args, ...args],
+        args: [this.name, ...this.args],
         cwd: cwd,
-        stdout: "inherit",
+        stdout: stdout,
         stderr: "inherit"
       });
+      if (stdout === "piped") {
+        const outputFile = await deno.open(
+          path.resolve(cwd, this.output),
+          "w+"
+        );
+        await deno.copy(outputFile, p.stdout);
+      }
     } catch (e) {
       if (e instanceof DenoError && e.kind === ErrorKind.NotFound) {
         throw new Error(`Command "${this.name}" not found.`);
@@ -71,65 +76,28 @@ async function kill(p: Process) {
 }
 
 class Ref implements Command {
-  constructor(public name: string, public args: string[]) {}
-  resolveRef(tasks: Tasks, context: ResolveContext) {
-    let command = tasks[this.name];
-    if (!command) {
-      throw new Error(`Task "${this.name}" is not defined.`);
-    }
-    if (context.checked.has(this.name)) {
-      throw new Error(`Task "${this.name}" is in a reference loop.`);
-    }
-    if (command instanceof Single) {
-      command = new Single(command.name, command.args.concat(this.args));
-    }
-    return command.resolveRef(tasks, {
-      ...context,
-      checked: new Set(context.checked).add(this.name)
-    });
-  }
-  async run(args: string[], context: RunContext) {
+  constructor(
+    public name: string,
+    public args: string[],
+    public input: string,
+    public output: string
+  ) {}
+  async run(context: RunContext) {
     throw new Error("Ref should be resolved before running.");
   }
 }
 class Sequence implements Command {
-  commands: Command[];
-  constructor(commands: Command[]) {
-    this.commands = commands;
-  }
-  resolveRef(tasks: Tasks, context: ResolveContext) {
-    return new Sequence(
-      this.commands.map(c => {
-        return c.resolveRef(tasks, context);
-      })
-    );
-  }
-  async run(args: string[], context: RunContext) {
-    if (args.length) {
-      throw new Error("Cannot pass args to sequential tasks.");
-    }
+  constructor(public commands: Command[]) {}
+  async run(context: RunContext) {
     for (let command of this.commands) {
-      await command.run([], context);
+      await command.run(context);
     }
   }
 }
 class Parallel implements Command {
-  commands: Command[];
-  constructor(commands: Command[]) {
-    this.commands = commands;
-  }
-  resolveRef(tasks: Tasks, context: ResolveContext) {
-    return new Parallel(
-      this.commands.map(c => {
-        return c.resolveRef(tasks, context);
-      })
-    );
-  }
-  async run(args: string[], context: RunContext) {
-    if (args.length) {
-      throw new Error("Cannot pass args to parallel tasks.");
-    }
-    await Promise.all(this.commands.map(c => c.run([], context)));
+  constructor(public commands: Command[]) {}
+  async run(context: RunContext) {
+    await Promise.all(this.commands.map(c => c.run(context)));
   }
 }
 class SyncWatcher implements Command {
@@ -138,28 +106,18 @@ class SyncWatcher implements Command {
     public watchOptions: WatchOptions,
     public command: Command
   ) {}
-  resolveRef(tasks: Tasks, context: ResolveContext) {
-    if (context.hasWatcher) {
-      throw new Error("Nested watchers not supported.");
-    }
-    return new SyncWatcher(
-      this.dirs,
-      this.watchOptions,
-      this.command.resolveRef(tasks, { ...context, hasWatcher: true })
-    );
-  }
-  async run(args: string[], context: RunContext) {
+  async run(context: RunContext) {
     const dirs_ = this.dirs.map(d => {
       return path.join(context.cwd, d);
     });
     const childResources = new Set();
     await this.command
-      .run(args, { ...context, resources: childResources })
+      .run({ ...context, resources: childResources })
       .catch(_ => {});
     for await (const _ of watch(dirs_, this.watchOptions)) {
       closeResouces(childResources);
       await this.command
-        .run(args, { ...context, resources: childResources })
+        .run({ ...context, resources: childResources })
         .catch(_ => {});
     }
   }
@@ -170,17 +128,7 @@ class AsyncWatcher implements Command {
     public watchOptions: WatchOptions,
     public command: Command
   ) {}
-  resolveRef(tasks: Tasks, context: ResolveContext) {
-    if (context.hasWatcher) {
-      throw new Error("Nested watchers not supported.");
-    }
-    return new AsyncWatcher(
-      this.dirs,
-      this.watchOptions,
-      this.command.resolveRef(tasks, { ...context, hasWatcher: true })
-    );
-  }
-  async run(args: string[], context: RunContext) {
+  async run(context: RunContext) {
     const dirs_ = this.dirs.map(d => {
       return path.join(context.cwd, d);
     });
@@ -191,13 +139,11 @@ class AsyncWatcher implements Command {
       }
     };
     context.resources.add(closer);
-    this.command
-      .run(args, { ...context, resources: childResources })
-      .catch(_ => {});
+    this.command.run({ ...context, resources: childResources }).catch(_ => {});
     for await (const _ of watch(dirs_, this.watchOptions)) {
       closeResouces(childResources);
       this.command
-        .run(args, { ...context, resources: childResources })
+        .run({ ...context, resources: childResources })
         .catch(_ => {});
     }
     context.resources.delete(closer);
@@ -235,6 +181,7 @@ export class TaskDecorator {
   }
 }
 interface RunOptions {
+  taskFile: string;
   cwd?: string;
 }
 interface RunContext {
@@ -253,19 +200,18 @@ export class TaskRunner {
     this.tasks[name] = makeCommand(rawCommands);
     return new TaskDecorator(this.tasks, name);
   }
-  async run(taskName: string, args: string[] = [], options: RunOptions = {}) {
+  async run(taskName: string, args: string[] = [], options: RunOptions) {
     options = { cwd: ".", ...options };
     let command = this.tasks[taskName];
     if (!command) {
       throw new Error(`Task "${taskName}" not found.`);
     }
-    const resolveContext = { checked: new Set(), hasWatcher: false };
     const context = {
+      taskFile: options.taskFile,
       cwd: options.cwd,
       resources: new Set()
     };
-    const resolvedCommand = command.resolveRef(this.tasks, resolveContext);
-    await resolvedCommand.run(args, context);
+    await command.run(context);
   }
 }
 
@@ -317,7 +263,7 @@ function makeCommandFromASTCommand(ast: AST.Command): Command {
     if (!taskName.length) {
       throw new Error("Task name should not be empty.");
     }
-    return new Ref(taskName, args);
+    return new Ref(taskName, args, ast.input, ast.output);
   }
-  return new Single(name, args);
+  return new Single(name, args, ast.input, ast.output);
 }

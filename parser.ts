@@ -47,7 +47,7 @@ function reduceCommand(ast: LTree<string>): AST.Command {
       if (!output) {
         throw new ParseError();
       }
-      result.output = result.output;
+      result.output = result.output || output;
     }
     ast = ast.left;
   }
@@ -58,7 +58,6 @@ function reduceCommand(ast: LTree<string>): AST.Command {
 }
 
 // Utilities
-
 function map<A, B>(f: (a: A) => B, p: Parser<A>): Parser<B> {
   return s => f(p(s));
 }

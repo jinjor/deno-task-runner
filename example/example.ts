@@ -13,3 +13,5 @@ task("start", "echo changed && $all").watchSync(".");
 
 task("server", "deno server.ts");
 task("dev", "echo restarting... && $server").watch(".");
+
+task("redirect-test", "echo hello > ../tmp/a.txt");
