@@ -9,6 +9,10 @@ export namespace AST {
 }
 
 export function parse(s: string): AST.Sequence {
+  const unsupportedOperators = s.match(/(>>|\|&)/g) || [];
+  if (unsupportedOperators.length) {
+    throw new Error(`Unsupported operator: ${unsupportedOperators.join(" ")}`);
+  }
   try {
     return seq(s);
   } catch (e) {
@@ -33,19 +37,21 @@ function reduceCommand(ast: LTree<string>): AST.Command {
       break;
     }
     if (ast.op === "<") {
-      result.input = ast.right.trim();
+      const input = ast.right.trim();
+      if (!input) {
+        throw new ParseError();
+      }
+      result.input = result.input || input;
     } else if (ast.op === ">") {
-      result.output = ast.right.trim();
+      const output = ast.right.trim();
+      if (!output) {
+        throw new ParseError();
+      }
+      result.output = result.output;
     }
     ast = ast.left;
   }
   if (!result.command) {
-    throw new ParseError();
-  }
-  if (result.input === "") {
-    throw new ParseError();
-  }
-  if (result.output === "") {
     throw new ParseError();
   }
   return result;

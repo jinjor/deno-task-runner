@@ -5,10 +5,9 @@ import { TaskRunner } from "../runner.ts";
 import { parse, AST } from "../parser.ts";
 
 test(async function parser() {
-  const input = "a 1 && b 2 | c 3 > d 4 < e 5 & f 6 || g 7";
-  const ast: AST.Sequence = parse(input);
-  console.log(input);
-  console.log(JSON.stringify(ast, null, 2));
+  const input1 = "a 1 && b 2 | c 3 > d 4 < e 5 & f 6 || g 7";
+  const input2 = " a 1&&b 2|c 3<e 5>???>d 4&f 6||g 7 ";
+  assertEqual(parse(input1), parse(input2));
   await throws(async () => {
     parse("");
   });
@@ -22,6 +21,12 @@ test(async function parser() {
     ...ops.map(op => `a ${op} ${op} b`),
     ...ops.map(op => `a${op} ${op}b`)
   ]) {
+    await throws(() => {
+      parse(s);
+    });
+  }
+  // unsupported for now
+  for (let s of ["a >> b", "a |& b"]) {
     await throws(() => {
       parse(s);
     });
