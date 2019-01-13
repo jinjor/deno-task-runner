@@ -28,6 +28,7 @@ class Atom implements Command {
     public output: string
   ) {}
   async run(args: string[], { taskFile, cwd, resources }: RunContext) {
+    // const stdin = this.input ? "piped" : "inherit";
     const stdout = this.output ? "piped" : "inherit";
     let p: Process;
     if (this.args[0].charAt(0) === "$") {

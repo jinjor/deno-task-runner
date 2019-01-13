@@ -4,7 +4,7 @@ install:
 test_script:
   - deno -v
   - mkdir tmp
-  - deno --allow-run test/test-task.ts --cwd=test | tee tmp/result
+  - deno --allow-run --allow-write test/test-task.ts --cwd=test test | tee tmp/result
   - deno test/test.ts --allow-run
   - deno example/example.ts --cwd=example all --allow-run
 

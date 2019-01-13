@@ -11,6 +11,17 @@ task("hello", "echo hello");
 task("hello2", "$hello alice && $hello bob");
 task("c", "deno count.ts");
 task("count", "$c start && $c foo 1 3 5 & $c bar 2 4 && $c end");
+task(
+  "test",
+  "$hello world",
+  "echo ====",
+  "$hello2",
+  "echo ====",
+  "$count",
+  "echo ====",
+  "echo redirect > /dev/null"
+  // "cat < ../tmp/a.txt"
+);
+
 task("hello-watch", "echo hello").watch(".");
 task("touch", "touch test.ts");
-task("test", "$hello world && echo ==== && $hello2 && echo ==== && $count");
