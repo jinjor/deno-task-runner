@@ -9,9 +9,8 @@ runner.task("hello-watch", "echo hello").watch(".");
 runner.task("touch", "touch test.ts");
 runner.task(
   "shell",
-  "echo hello > ../tmp/hello",
-  "echo world >> ../tmp/hello",
-  "cat < ../tmp/hello"
+  "echo hello > ../tmp/result-from-shell",
+  "echo world >> ../tmp/result-from-shell"
 );
 
 (async () => {

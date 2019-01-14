@@ -9,11 +9,7 @@ test(async function basics() {
     .decode(bytes)
     .replace(/\r\n/g, "\n")
     .trim();
-
-  assertEqual(result, expectation);
-});
-
-const expectation = `
+  const expectation = `
 hello world
 ====
 hello alice
@@ -27,11 +23,26 @@ bar
 foo
 end
 ====
+`
+    .replace(/\r\n/g, "\n")
+    .trim();
+  assertEqual(result, expectation);
+});
+
+test(async function shell() {
+  const bytes = await readFile("tmp/result-from-shell");
+  const result = new TextDecoder()
+    .decode(bytes)
+    .replace(/\r\n/g, "\n")
+    .trim();
+  const expectation = `
 hello
 world
 `
-  .replace(/\r\n/g, "\n")
-  .trim();
+    .replace(/\r\n/g, "\n")
+    .trim();
+  assertEqual(result, expectation);
+});
 
 test(async function errors() {
   await throws(async () => {
