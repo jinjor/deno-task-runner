@@ -1,10 +1,10 @@
-import { ProcessStatus, Closer, DenoError, ErrorKind, Process } from "deno";
+import { ProcessStatus, Closer, Process } from "deno";
 import * as deno from "deno";
 import {
   watch,
   Options as WatchOptions
 } from "https://deno.land/x/watch@1.2.0/mod.ts";
-import * as path from "https://deno.land/x/path@v0.2.5/index.ts";
+import * as path from "https://deno.land/x/fs/path.ts"; // should fix later
 
 type Tasks = { [name: string]: Command };
 interface ResolveContext {
@@ -26,25 +26,20 @@ interface Command {
   run(args: string[], context: RunContext): Promise<void>;
 }
 class Single implements Command {
-  constructor(public name: string, public args: string[]) {}
+  constructor(public script: string) {}
   resolveRef(tasks: Tasks, _: ResolveContext) {
     return this;
   }
-  async run(args: string[], { cwd, resources }: RunContext) {
-    let p: Process;
-    try {
-      p = deno.run({
-        args: [this.name, ...this.args, ...args],
-        cwd: cwd,
-        stdout: "inherit",
-        stderr: "inherit"
-      });
-    } catch (e) {
-      if (e instanceof DenoError && e.kind === ErrorKind.NotFound) {
-        throw new Error(`Command "${this.name}" not found.`);
-      }
-      throw e;
-    }
+  async run(args: string[], { cwd, shell, resources }: RunContext) {
+    const allArgs = shell
+      ? [...getShellCommand(), [this.script, ...args].join(" ")]
+      : [...this.script.split(/\s/), ...args];
+    const p = deno.run({
+      args: allArgs,
+      cwd: cwd,
+      stdout: "inherit",
+      stderr: "inherit"
+    });
     const closer = {
       close() {
         kill(p);
@@ -59,6 +54,16 @@ class Single implements Command {
     }
   }
 }
+
+function getShellCommand(): string[] {
+  let env = deno.env();
+  if (deno.platform.os === "win") {
+    return [env.COMSPEC || "cmd.exe", "/D", "/C"];
+  } else {
+    return [env.SHELL || "/bin/sh", "-c"];
+  }
+}
+
 async function kill(p: Process) {
   const k = deno.run({
     args: ["kill", `${p.pid}`],
@@ -70,21 +75,28 @@ async function kill(p: Process) {
 }
 
 class Ref implements Command {
-  constructor(public name: string, public args: string[]) {}
+  constructor(public script: string) {}
   resolveRef(tasks: Tasks, context: ResolveContext) {
-    let command = tasks[this.name];
-    if (!command) {
-      throw new Error(`Task "${this.name}" is not defined.`);
+    const splitted = this.script.split(/\s/);
+    const name = splitted[0].slice(1);
+    const args = splitted.slice(1);
+    if (!name.length) {
+      throw new Error("Task name should not be empty.");
     }
-    if (context.checked.has(this.name)) {
-      throw new Error(`Task "${this.name}" is in a reference loop.`);
+
+    let command = tasks[name];
+    if (!command) {
+      throw new Error(`Task "${name}" is not defined.`);
+    }
+    if (context.checked.has(name)) {
+      throw new Error(`Task "${name}" is in a reference loop.`);
     }
     if (command instanceof Single) {
-      command = new Single(command.name, command.args.concat(this.args));
+      command = new Single([command.script, ...args].join(" "));
     }
     return command.resolveRef(tasks, {
       ...context,
-      checked: new Set(context.checked).add(this.name)
+      checked: new Set(context.checked).add(name)
     });
   }
   async run(args: string[], context: RunContext) {
@@ -235,9 +247,11 @@ export class TaskDecorator {
 }
 interface RunOptions {
   cwd?: string;
+  shell?: boolean;
 }
 interface RunContext {
   cwd: string;
+  shell: boolean;
   resources: Set<Closer>;
 }
 export class TaskRunner {
@@ -253,7 +267,7 @@ export class TaskRunner {
     return new TaskDecorator(this.tasks, name);
   }
   async run(taskName: string, args: string[] = [], options: RunOptions = {}) {
-    options = { cwd: ".", ...options };
+    options = { cwd: ".", shell: true, ...options };
     let command = this.tasks[taskName];
     if (!command) {
       throw new Error(`Task "${taskName}" not found.`);
@@ -261,6 +275,7 @@ export class TaskRunner {
     const resolveContext = { checked: new Set(), hasWatcher: false };
     const context = {
       cwd: options.cwd,
+      shell: options.shell,
       resources: new Set()
     };
     const resolvedCommand = command.resolveRef(this.tasks, resolveContext);
@@ -283,19 +298,13 @@ function makeNonSequenceCommand(rawCommand: string | string[]): Command {
   }
   return new Parallel(rawCommand.map(makeSingleCommand));
 }
-function makeSingleCommand(raw: string) {
-  const splitted = raw.split(/\s/);
-  if (!splitted.length) {
+function makeSingleCommand(script: string) {
+  script = script.trim();
+  if (!script.trim()) {
     throw new Error("Command should not be empty.");
   }
-  const name = splitted[0];
-  const args = splitted.splice(1);
-  if (name.charAt(0) === "$") {
-    const taskName = name.slice(1);
-    if (!taskName.length) {
-      throw new Error("Task name should not be empty.");
-    }
-    return new Ref(taskName, args);
+  if (script.charAt(0) === "$") {
+    return new Ref(script);
   }
-  return new Single(name, args);
+  return new Single(script);
 }
