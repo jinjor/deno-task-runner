@@ -34,6 +34,7 @@ test(async function shell() {
   const result = new TextDecoder()
     .decode(bytes)
     .replace(/\r\n/g, "\n")
+    .replace(/\s*\n/g, "\n") // for cmd.exe
     .trim();
   const expectation = `
 hello
