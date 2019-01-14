@@ -26,6 +26,9 @@ foo
 bar
 foo
 end
+====
+hello
+world
 `
   .replace(/\r\n/g, "\n")
   .trim();

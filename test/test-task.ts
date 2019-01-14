@@ -7,6 +7,12 @@ runner.task("c", "deno count.ts");
 runner.task("count", "$c start", ["$c foo 1 3 5", "$c bar 2 4"], "$c end");
 runner.task("hello-watch", "echo hello").watch(".");
 runner.task("touch", "touch test.ts");
+runner.task(
+  "shell",
+  "echo hello > ../tmp/hello",
+  "echo world >> ../tmp/hello",
+  "cat < ../tmp/hello"
+);
 
 (async () => {
   await runner.run("hello", ["world"], { cwd: "test" });
@@ -14,6 +20,8 @@ runner.task("touch", "touch test.ts");
   await runner.run("hello2", [], { cwd: "test" });
   console.log("====");
   await runner.run("count", [], { cwd: "test" });
+  console.log("====");
+  await runner.run("shell", [], { cwd: "test" });
   // console.log("====");
   // await runner.run("hello-watch", [],{ cwd: "test" });
   // await new Promise(resolve => setTimeout(resolve, 1000));
