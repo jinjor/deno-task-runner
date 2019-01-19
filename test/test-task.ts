@@ -1,28 +1,26 @@
-import { TaskRunner } from "../runner.ts";
+import { task } from "../mod.ts";
 
-const runner = new TaskRunner();
-runner.task("hello", "echo hello");
-runner.task("hello2", "$hello alice", "$hello bob");
-runner.task("c", "deno count.ts");
-runner.task("count", "$c start", ["$c foo 1 3 5", "$c bar 2 4"], "$c end");
-runner.task("hello-watch", "echo hello").watch(".");
-runner.task("touch", "touch test.ts");
-runner.task(
+task("hello", "echo hello");
+task("hello2", "$hello alice", "$hello bob");
+task("123456", "echo 123 && echo 456");
+task("c", "deno count.ts");
+task("count", "$c start", ["$c foo 1 3 5", "$c bar 2 4"], "$c end");
+task("hello-watch", "echo hello").watch(".");
+task("touch", "touch test.ts");
+task(
   "shell",
   `echo hello > ../tmp/result-from-shell`,
-  `echo world >> ../tmp/result-from-shell`
+  `echo world >> ../tmp/result-from-shell`,
+  `$123456 >> ../tmp/result-from-shell`
 );
-
-(async () => {
-  await runner.run("hello", ["world"], { cwd: "test" });
-  console.log("====");
-  await runner.run("hello2", [], { cwd: "test" });
-  console.log("====");
-  await runner.run("count", [], { cwd: "test" });
-  console.log("====");
-  await runner.run("shell", [], { cwd: "test" });
-  // console.log("====");
-  // await runner.run("hello-watch", [],{ cwd: "test" });
-  // await new Promise(resolve => setTimeout(resolve, 1000));
-  // await runner.run("touch", [],{ cwd: "test" });
-})();
+task(
+  "all",
+  "$hello world",
+  "echo ====",
+  "$hello2",
+  "echo ====",
+  "$count",
+  "echo ====",
+  "$shell",
+  "echo ===="
+);

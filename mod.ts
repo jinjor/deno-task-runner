@@ -39,12 +39,13 @@ new Promise(resolve => setTimeout(resolve, 0))
   .then(async () => {
     const parsedArgs = flags.parse(args);
     const cwd = parsedArgs.cwd || ".";
+    const taskFile = parsedArgs._[0];
     const taskName = parsedArgs._[1];
     const taskArgs = parsedArgs._.splice(2);
     if (!taskName) {
       throw new Error("Usage: task_file.ts task_name [--cwd]");
     }
-    await globalRunner.run(taskName, taskArgs, { cwd });
+    await globalRunner.run(taskName, taskFile, taskArgs, { cwd });
   })
   .catch(e => {
     console.error(e);

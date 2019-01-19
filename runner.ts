@@ -7,7 +7,7 @@ import {
 import * as path from "https://deno.land/x/fs/path.ts"; // should fix later
 
 type Tasks = { [name: string]: Command };
-interface ResolveContext {
+interface ValidateContext {
   checked: Set<string>;
   hasWatcher: boolean;
 }
@@ -22,17 +22,26 @@ class ProcessError extends Error {
   }
 }
 interface Command {
-  resolveRef(tasks: Tasks, context: ResolveContext): Command;
+  validate(tasks: Tasks, context: ValidateContext): void;
   run(args: string[], context: RunContext): Promise<void>;
 }
 class Single implements Command {
   constructor(public script: string) {}
-  resolveRef(tasks: Tasks, _: ResolveContext) {
-    return this;
-  }
-  async run(args: string[], { cwd, shell, resources }: RunContext) {
+  validate(tasks: Tasks, _: ValidateContext) {}
+  async run(
+    args: string[],
+    { taskFile, cwd, tasks, shell, resources }: RunContext
+  ) {
+    let script = this.script;
+    for (let taskName of Object.keys(tasks)) {
+      const regex = new RegExp(`\\$${taskName}`, "g");
+      script = script.replace(
+        regex,
+        `deno -A ${path.relative(cwd, taskFile)} ${taskName}`
+      );
+    }
     const allArgs = shell
-      ? [...getShellCommand(), [this.script, ...args].join(" ")]
+      ? [...getShellCommand(), [script, ...args].join(" ")]
       : [...this.script.split(/\s/), ...args];
     const p = deno.run({
       args: allArgs,
@@ -65,6 +74,7 @@ function getShellCommand(): string[] {
 }
 
 async function kill(p: Process) {
+  console.log("kill", p.pid);
   const k = deno.run({
     args: ["kill", `${p.pid}`],
     stdout: "inherit",
@@ -74,46 +84,13 @@ async function kill(p: Process) {
   k.close();
 }
 
-class Ref implements Command {
-  constructor(public script: string) {}
-  resolveRef(tasks: Tasks, context: ResolveContext) {
-    const splitted = this.script.split(/\s/);
-    const name = splitted[0].slice(1);
-    const args = splitted.slice(1);
-    if (!name.length) {
-      throw new Error("Task name should not be empty.");
-    }
-
-    let command = tasks[name];
-    if (!command) {
-      throw new Error(`Task "${name}" is not defined.`);
-    }
-    if (context.checked.has(name)) {
-      throw new Error(`Task "${name}" is in a reference loop.`);
-    }
-    if (command instanceof Single) {
-      command = new Single([command.script, ...args].join(" "));
-    }
-    return command.resolveRef(tasks, {
-      ...context,
-      checked: new Set(context.checked).add(name)
-    });
-  }
-  async run(args: string[], context: RunContext) {
-    throw new Error("Ref should be resolved before running.");
-  }
-}
 class Sequence implements Command {
   commands: Command[];
   constructor(commands: Command[]) {
     this.commands = commands;
   }
-  resolveRef(tasks: Tasks, context: ResolveContext) {
-    return new Sequence(
-      this.commands.map(c => {
-        return c.resolveRef(tasks, context);
-      })
-    );
+  validate(tasks: Tasks, context: ValidateContext) {
+    this.commands.forEach(c => c.validate(tasks, context));
   }
   async run(args: string[], context: RunContext) {
     if (args.length) {
@@ -129,12 +106,8 @@ class Parallel implements Command {
   constructor(commands: Command[]) {
     this.commands = commands;
   }
-  resolveRef(tasks: Tasks, context: ResolveContext) {
-    return new Parallel(
-      this.commands.map(c => {
-        return c.resolveRef(tasks, context);
-      })
-    );
+  validate(tasks: Tasks, context: ValidateContext) {
+    this.commands.forEach(c => c.validate(tasks, context));
   }
   async run(args: string[], context: RunContext) {
     if (args.length) {
@@ -149,15 +122,11 @@ class SyncWatcher implements Command {
     public watchOptions: WatchOptions,
     public command: Command
   ) {}
-  resolveRef(tasks: Tasks, context: ResolveContext) {
+  validate(tasks: Tasks, context: ValidateContext) {
     if (context.hasWatcher) {
       throw new Error("Nested watchers not supported.");
     }
-    return new SyncWatcher(
-      this.dirs,
-      this.watchOptions,
-      this.command.resolveRef(tasks, { ...context, hasWatcher: true })
-    );
+    this.command.validate(tasks, { ...context, hasWatcher: true });
   }
   async run(args: string[], context: RunContext) {
     const dirs_ = this.dirs.map(d => {
@@ -181,15 +150,11 @@ class AsyncWatcher implements Command {
     public watchOptions: WatchOptions,
     public command: Command
   ) {}
-  resolveRef(tasks: Tasks, context: ResolveContext) {
+  validate(tasks: Tasks, context: ValidateContext) {
     if (context.hasWatcher) {
       throw new Error("Nested watchers not supported.");
     }
-    return new AsyncWatcher(
-      this.dirs,
-      this.watchOptions,
-      this.command.resolveRef(tasks, { ...context, hasWatcher: true })
-    );
+    this.command.validate(tasks, { ...context, hasWatcher: true });
   }
   async run(args: string[], context: RunContext) {
     const dirs_ = this.dirs.map(d => {
@@ -250,9 +215,11 @@ interface RunOptions {
   shell?: boolean;
 }
 interface RunContext {
+  taskFile: string;
   cwd: string;
   shell: boolean;
   resources: Set<Closer>;
+  tasks: Tasks;
 }
 export class TaskRunner {
   tasks: Tasks = {};
@@ -266,20 +233,29 @@ export class TaskRunner {
     this.tasks[name] = makeCommand(rawCommands);
     return new TaskDecorator(this.tasks, name);
   }
-  async run(taskName: string, args: string[] = [], options: RunOptions = {}) {
-    options = { cwd: ".", shell: true, ...options };
+  async validate(taskName: string) {
     let command = this.tasks[taskName];
     if (!command) {
       throw new Error(`Task "${taskName}" not found.`);
     }
-    const resolveContext = { checked: new Set(), hasWatcher: false };
-    const context = {
+    command.validate(this.tasks, { checked: new Set(), hasWatcher: false });
+  }
+  async run(
+    taskName: string,
+    taskFile: string,
+    args: string[] = [],
+    options: RunOptions = {}
+  ) {
+    options = { cwd: ".", shell: true, ...options };
+    this.validate(taskName);
+    let command = this.tasks[taskName];
+    await command.run(args, {
+      taskFile,
       cwd: options.cwd,
       shell: options.shell,
-      resources: new Set()
-    };
-    const resolvedCommand = command.resolveRef(this.tasks, resolveContext);
-    await resolvedCommand.run(args, context);
+      resources: new Set(),
+      tasks: this.tasks
+    });
   }
 }
 
@@ -302,9 +278,6 @@ function makeSingleCommand(script: string) {
   script = script.trim();
   if (!script.trim()) {
     throw new Error("Command should not be empty.");
-  }
-  if (script.charAt(0) === "$") {
-    return new Ref(script);
   }
   return new Single(script);
 }
